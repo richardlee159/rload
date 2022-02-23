@@ -16,11 +16,11 @@ parser.add_argument('-R', '--rate', type=int, required=True,
                     help='work rate in requests/second')
 args = parser.parse_args()
 
-# unit of time: ms
+# unit of time: us
 distribution = args.dist
-duration = args.duration * 1000
+duration = args.duration * 1e6
 rate = args.rate
-interval = 1000 / rate
+interval = 1e6 / rate
 gen_next = dict_gen_next[distribution]
 
 start = 0

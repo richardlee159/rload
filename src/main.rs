@@ -43,7 +43,7 @@ async fn tokio_main() -> Result<()> {
     let file = File::open(args.trace_file)?;
     let starts: Vec<_> = BufReader::new(file)
         .lines()
-        .map(|l| Duration::from_millis(l.unwrap().parse::<u64>().unwrap()))
+        .map(|l| Duration::from_micros(l.unwrap().parse::<u64>().unwrap()))
         .collect();
 
     let mut traces = Vec::new();
@@ -88,12 +88,12 @@ async fn tokio_main() -> Result<()> {
 
     println!("successful responses: {}", traces.len());
     println!("error (non-2xx or 3xx) responses: {}", errors);
-    println!("traces (start_ms, end_ms):");
+    println!("traces (start_us, end_us):");
     for &(start, end) in traces.iter() {
         println!(
             "{}, {}",
-            (start - base).as_millis(),
-            (end - base).as_millis()
+            (start - base).as_micros(),
+            (end - base).as_micros()
         );
     }
 

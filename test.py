@@ -15,16 +15,17 @@ st = session.prepare('''
 ''')
 
 
-def rload(tracefile='trace.txt'):
+def rload(f, tracefile='trace.txt'):
     return subprocess.run([
         'target/release/rload',
         '-t', tracefile,
-    ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    ], stdin=subprocess.DEVNULL, stdout=f)
 
 
 def bench():
     st_arg = math.ceil(time.time() * 1e6)
-    p = rload()
+    with open('trace_rload.txt', 'w') as f:
+        p = rload(f)
     assert p.returncode == 0, f'returncode: {p.returncode}'
 
     print('waiting for traces')
@@ -35,8 +36,8 @@ def bench():
 
     with open('trace_jaeger.txt', 'w') as f:
         for start in starts:
-            start = (start - base) / 1e3
-            f.write(f'{start:.1f}\n')
+            start = (start - base)
+            f.write(f'{start:.0f}\n')
 
 
 if __name__ == '__main__':
