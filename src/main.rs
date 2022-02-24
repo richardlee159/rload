@@ -1,7 +1,7 @@
 mod workload;
 
 use clap::Parser;
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -27,7 +27,6 @@ struct Args {
 struct Trace {
     start: Instant,
     end: Instant,
-    status: StatusCode,
 }
 
 fn main() -> Result<()> {
@@ -38,7 +37,10 @@ fn main() -> Result<()> {
 // #[tokio::main]
 async fn tokio_main() -> Result<()> {
     let args = Args::parse();
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
 
     let file = File::open(args.trace_file)?;
     let starts: Vec<_> = BufReader::new(file)
@@ -47,7 +49,8 @@ async fn tokio_main() -> Result<()> {
         .collect();
 
     let mut traces = Vec::new();
-    let mut errors = 0usize;
+    let mut status_errors = 0usize;
+    let mut timeouts = 0usize;
     let (tx, mut rx) = mpsc::channel(100);
 
     let base = Instant::now();
@@ -61,39 +64,48 @@ async fn tokio_main() -> Result<()> {
                     .post("http://localhost:30001/wrk2-api/post/compose")
                     .body(compose_post());
                 let start = Instant::now();
-                match request.send().await {
-                    Ok(response) => {
-                        let end = Instant::now();
-                        let status = response.status();
-                        let trace = Trace { start, end, status };
-                        tx.send(trace).await.unwrap();
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        exit(-1);
-                    }
-                };
+                let result = request.send().await;
+                let end = Instant::now();
+
+                tx.send(match result {
+                    Ok(r) => r.error_for_status().map(|_| Trace { start, end }),
+                    Err(e) => Err(e),
+                })
+                .await
+                .unwrap();
             });
         }
     });
 
-    while let Some(trace) = rx.recv().await {
-        if trace.status.is_success() | trace.status.is_redirection() {
-            traces.push((trace.start, trace.end));
-        } else {
-            eprintln!("response error: {}", trace.status);
-            errors += 1;
+    while let Some(result) = rx.recv().await {
+        match result {
+            Ok(trace) => {
+                traces.push(trace);
+            }
+            Err(e) if e.is_status() => {
+                eprintln!("response status error: {}", e.status().unwrap());
+                status_errors += 1;
+            }
+            Err(e) if e.is_timeout() => {
+                eprintln!("request timed out");
+                timeouts += 1;
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                exit(-1);
+            }
         }
     }
 
     println!("successful responses: {}", traces.len());
-    println!("error (non-2xx or 3xx) responses: {}", errors);
+    println!("4xx or 5xx responses: {}", status_errors);
+    println!("timeouts: {}", timeouts);
     println!("traces (start_us, end_us):");
-    for &(start, end) in traces.iter() {
+    for trace in traces.iter() {
         println!(
             "{}, {}",
-            (start - base).as_micros(),
-            (end - base).as_micros()
+            (trace.start - base).as_micros(),
+            (trace.end - base).as_micros()
         );
     }
 
