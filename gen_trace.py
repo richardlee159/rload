@@ -8,7 +8,7 @@ dict_gen_next = {
 }
 
 parser = argparse.ArgumentParser(description='Generate tracefile for rload.')
-parser.add_argument('-D', '--dist', choices=dict_gen_next.keys(),
+parser.add_argument('-D', '--dist', choices=dict_gen_next.keys(), required=True,
                     help='distribution of the inter-arrival time of requests')
 parser.add_argument('-d', '--duration', type=int, required=True,
                     help='duration of test in seconds')
