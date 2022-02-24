@@ -18,7 +18,7 @@ st = session.prepare('''
 def rload(f, tracefile='trace.txt'):
     return subprocess.run([
         'target/release/rload',
-        '-t', tracefile,
+        '-f', tracefile,
     ], stdin=subprocess.DEVNULL, stdout=f)
 
 

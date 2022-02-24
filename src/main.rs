@@ -19,7 +19,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 
 #[derive(Parser)]
 struct Args {
-    #[clap(short, long, parse(from_os_str))]
+    #[clap(short='f', parse(from_os_str))]
     trace_file: std::path::PathBuf,
 }
 
