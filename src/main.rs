@@ -19,8 +19,9 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 
 #[derive(Parser)]
 struct Args {
-    #[clap(short='f', parse(from_os_str))]
+    #[clap(short = 'f', parse(from_os_str))]
     trace_file: std::path::PathBuf,
+    url: String,
 }
 
 #[derive(Debug)]
@@ -56,13 +57,10 @@ async fn tokio_main() -> Result<()> {
     let base = Instant::now();
     tokio::spawn(async move {
         for start in starts {
-            sleep_until(base + start).await;
-            let client = client.clone();
+            let request = client.post(&args.url).body(compose_post());
             let tx = tx.clone();
+            sleep_until(base + start).await;
             tokio::spawn(async move {
-                let request = client
-                    .post("http://localhost:30001/wrk2-api/post/compose")
-                    .body(compose_post());
                 let start = Instant::now();
                 let result = request.send().await;
                 let end = Instant::now();

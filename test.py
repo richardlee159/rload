@@ -19,6 +19,7 @@ def rload(f, tracefile='trace.txt'):
     return subprocess.run([
         'target/release/rload',
         '-f', tracefile,
+        'http://localhost:30001/wrk2-api/post/compose',
     ], stdin=subprocess.DEVNULL, stdout=f)
 
 
