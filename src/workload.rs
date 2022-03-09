@@ -63,5 +63,5 @@ pub fn compose_post() -> String {
         format!("username={username}&user_id={user_id}&text={text}&media_ids=&post_type=0")
     };
 
-    return body;
+    body
 }
