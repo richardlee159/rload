@@ -1,13 +1,15 @@
+mod luascript;
 mod workload;
 
 #[macro_use]
 extern crate log;
 
 use clap::Parser;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use std::{
     fs::File,
     io::{BufRead, BufReader},
+    path::PathBuf,
     process::exit,
     time::Duration,
 };
@@ -16,15 +18,21 @@ use tokio::{
     sync::mpsc,
     time::{sleep_until, Instant},
 };
-use workload::compose_post;
+
+use crate::{
+    luascript::{build_request, new_state},
+    workload::compose_post,
+};
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Parser)]
 struct Args {
     #[clap(short = 'f', parse(from_os_str))]
-    trace_file: std::path::PathBuf,
-    url: String,
+    trace_file: PathBuf,
+    #[clap(short, parse(from_os_str))]
+    script: Option<PathBuf>,
+    url: Url,
 }
 
 #[derive(Debug)]
@@ -53,6 +61,12 @@ async fn tokio_main() -> Result<()> {
         .map(|l| Duration::from_micros(l.unwrap().parse::<u64>().unwrap()))
         .collect();
 
+    let lua = if let Some(path) = args.script {
+        Some(new_state(&path)?)
+    } else {
+        None
+    };
+
     let mut traces = Vec::new();
     let mut status_errors = 0usize;
     let mut timeouts = 0usize;
@@ -61,7 +75,12 @@ async fn tokio_main() -> Result<()> {
     let base = Instant::now();
     tokio::spawn(async move {
         for start in starts {
-            let request = client.post(&args.url).body(compose_post());
+            let url = args.url.clone();
+            let request = if let Some(lua) = &lua {
+                build_request(&client, url, lua).unwrap()
+            } else {
+                client.post(url).body(compose_post())
+            };
             let tx = tx.clone();
             sleep_until(base + start).await;
             tokio::spawn(async move {
