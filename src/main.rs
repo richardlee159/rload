@@ -1,5 +1,8 @@
 mod workload;
 
+#[macro_use]
+extern crate log;
+
 use clap::Parser;
 use reqwest::Client;
 use std::{
@@ -31,6 +34,7 @@ struct Trace {
 }
 
 fn main() -> Result<()> {
+    env_logger::init();
     let rt = Builder::new_current_thread().enable_all().build()?;
     rt.block_on(tokio_main())
 }
@@ -81,15 +85,15 @@ async fn tokio_main() -> Result<()> {
                 traces.push(trace);
             }
             Err(e) if e.is_status() => {
-                eprintln!("response status error: {}", e.status().unwrap());
+                warn!("{}", e);
                 status_errors += 1;
             }
             Err(e) if e.is_timeout() => {
-                eprintln!("request timed out");
+                warn!("{}", e);
                 timeouts += 1;
             }
             Err(e) => {
-                eprintln!("{}", e);
+                error!("{}", e);
                 exit(-1);
             }
         }
