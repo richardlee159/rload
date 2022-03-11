@@ -118,6 +118,20 @@ async fn tokio_main() -> Result<()> {
         }
     }
 
+    eprintln!("successful responses: {}", traces.len());
+    eprintln!("4xx or 5xx responses: {}", status_errors);
+    eprintln!("timeouts: {}", timeouts);
+    eprintln!("latency distribution:");
+    let mut latency: Vec<_> = traces.iter().map(|t| t.end - t.start).collect();
+    latency.sort();
+    for percentage in [50, 90, 95, 99] {
+        eprintln!(
+            "  {}% {:7.2}ms",
+            percentage,
+            latency[(latency.len() * percentage - 1) / 100].as_micros() as f64 / 1000.0
+        );
+    }
+
     println!("successful responses: {}", traces.len());
     println!("4xx or 5xx responses: {}", status_errors);
     println!("timeouts: {}", timeouts);
