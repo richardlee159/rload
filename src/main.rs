@@ -70,6 +70,7 @@ async fn tokio_main() -> Result<()> {
     let mut traces = Vec::new();
     let mut status_errors = 0usize;
     let mut timeouts = 0usize;
+    let mut other_errors = 0usize;
     let (tx, mut rx) = mpsc::channel(100);
 
     let base = Instant::now();
@@ -111,9 +112,13 @@ async fn tokio_main() -> Result<()> {
                 warn!("{}", e);
                 timeouts += 1;
             }
-            Err(e) => {
+            Err(e) if e.is_connect() => {
                 error!("{}", e);
                 exit(-1);
+            }
+            Err(e) => {
+                warn!("{}", e);
+                other_errors += 1;
             }
         }
     }
@@ -121,6 +126,7 @@ async fn tokio_main() -> Result<()> {
     eprintln!("successful responses: {}", traces.len());
     eprintln!("4xx or 5xx responses: {}", status_errors);
     eprintln!("timeouts: {}", timeouts);
+    eprintln!("other errors: {}", other_errors);
     eprintln!("latency distribution:");
     let mut latency: Vec<_> = traces.iter().map(|t| t.end - t.start).collect();
     latency.sort();
