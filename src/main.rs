@@ -32,6 +32,8 @@ struct Args {
     trace_file: PathBuf,
     #[clap(short, parse(from_os_str))]
     script: Option<PathBuf>,
+    #[clap(long, default_value_t = 10000)]
+    timeout: u64,
     url: Url,
 }
 
@@ -51,7 +53,7 @@ fn main() -> Result<()> {
 async fn tokio_main() -> Result<()> {
     let args = Args::parse();
     let client = Client::builder()
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_millis(args.timeout))
         .build()
         .unwrap();
 
