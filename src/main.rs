@@ -6,11 +6,11 @@ extern crate log;
 
 use clap::Parser;
 use reqwest::{Client, Url};
+use serde_json::json;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
     path::PathBuf,
-    process::exit,
     time::Duration,
 };
 use tokio::{
@@ -37,6 +37,10 @@ struct Args {
     timeout: u64,
     #[clap(long, default_value_t = 1)]
     replay: u32,
+    #[clap(long, default_value_t = 60)]
+    stats_report_interval: u64,
+    #[clap(long, default_value_t = 95)]
+    stats_latency_percentage: usize,
     url: Url,
 }
 
@@ -44,6 +48,74 @@ struct Args {
 struct Trace {
     start: Instant,
     end: Instant,
+}
+
+struct BenchLog {
+    traces: Vec<Trace>,
+    timeouts: usize,
+    status_errors: usize,
+    connect_errors: usize,
+    other_errors: usize,
+}
+
+impl BenchLog {
+    fn new() -> Self {
+        Self {
+            traces: Vec::new(),
+            timeouts: 0,
+            status_errors: 0,
+            connect_errors: 0,
+            other_errors: 0,
+        }
+    }
+
+    fn update_trace(&mut self, trace: Trace) {
+        self.traces.push(trace);
+    }
+
+    fn update_err(&mut self, err: reqwest::Error) {
+        match err {
+            e if e.is_timeout() => {
+                self.timeouts += 1;
+            }
+            e if e.is_status() => {
+                self.status_errors += 1;
+            }
+            e if e.is_connect() => {
+                self.connect_errors += 1;
+            }
+            _ => {
+                self.other_errors += 1;
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.traces.clear();
+        self.timeouts = 0;
+        self.status_errors = 0;
+        self.connect_errors = 0;
+        self.other_errors = 0;
+    }
+
+    fn successes(&self) -> usize {
+        self.traces.len()
+    }
+
+    fn errors(&self) -> usize {
+        self.timeouts + self.status_errors + self.connect_errors + self.other_errors
+    }
+
+    fn latency_ms(&self, percentage: usize) -> f64 {
+        let mut latency: Vec<_> = self.traces.iter().map(|t| t.end - t.start).collect();
+        latency.sort();
+        latency
+            .get((latency.len() * percentage - 1) / 100)
+            .cloned()
+            .unwrap_or_default()
+            .as_micros() as f64
+            / 1000.0
+    }
 }
 
 fn main() -> Result<()> {
@@ -72,10 +144,7 @@ async fn tokio_main() -> Result<()> {
         None
     };
 
-    let mut traces = Vec::new();
-    let mut status_errors = 0usize;
-    let mut timeouts = 0usize;
-    let mut other_errors = 0usize;
+    let mut bench_log = BenchLog::new();
     let (tx, mut rx) = mpsc::channel(100);
 
     let base = Instant::now();
@@ -107,55 +176,25 @@ async fn tokio_main() -> Result<()> {
         }
     });
 
+    let mut last_report_time = Instant::now();
     while let Some(result) = rx.recv().await {
         match result {
-            Ok(trace) => {
-                traces.push(trace);
-            }
-            Err(e) if e.is_status() => {
-                warn!("{}", e);
-                status_errors += 1;
-            }
-            Err(e) if e.is_timeout() => {
-                warn!("{}", e);
-                timeouts += 1;
-            }
-            Err(e) if e.is_connect() => {
-                error!("{}", e);
-                exit(-1);
-            }
+            Ok(trace) => bench_log.update_trace(trace),
             Err(e) => {
                 warn!("{}", e);
-                other_errors += 1;
+                bench_log.update_err(e);
             }
         }
-    }
-
-    eprintln!("successful responses: {}", traces.len());
-    eprintln!("4xx or 5xx responses: {}", status_errors);
-    eprintln!("timeouts: {}", timeouts);
-    eprintln!("other errors: {}", other_errors);
-    eprintln!("latency distribution:");
-    let mut latency: Vec<_> = traces.iter().map(|t| t.end - t.start).collect();
-    latency.sort();
-    for percentage in [50, 90, 95, 99] {
-        eprintln!(
-            "  {}% {:7.2}ms",
-            percentage,
-            latency[(latency.len() * percentage - 1) / 100].as_micros() as f64 / 1000.0
-        );
-    }
-
-    println!("successful responses: {}", traces.len());
-    println!("4xx or 5xx responses: {}", status_errors);
-    println!("timeouts: {}", timeouts);
-    println!("traces (start_us, end_us):");
-    for trace in traces.iter() {
-        println!(
-            "{}, {}",
-            (trace.start - base).as_micros(),
-            (trace.end - base).as_micros()
-        );
+        if last_report_time.elapsed() > Duration::from_secs(args.stats_report_interval) {
+            last_report_time = Instant::now();
+            let stats = json!({
+                "successes": bench_log.successes(),
+                "errors": bench_log.errors(),
+                "latency": bench_log.latency_ms(args.stats_latency_percentage),
+            });
+            println!("{}", stats);
+            bench_log.clear();
+        }
     }
 
     Ok(())

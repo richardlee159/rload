@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "rload"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -795,6 +795,7 @@ dependencies = [
  "mlua",
  "rand",
  "reqwest",
+ "serde_json",
  "tokio",
 ]
 
