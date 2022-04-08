@@ -27,6 +27,7 @@ use crate::{
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Parser)]
+#[clap(version)]
 struct Args {
     #[clap(short = 'f', parse(from_os_str))]
     trace_file: PathBuf,
