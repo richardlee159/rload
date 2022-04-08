@@ -29,15 +29,15 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 #[derive(Parser)]
 #[clap(version)]
 struct Args {
-    #[clap(short = 'f', parse(from_os_str))]
-    trace_file: PathBuf,
-    #[clap(short, parse(from_os_str))]
+    #[clap(short = 'f', long, parse(from_os_str))]
+    tracefile: PathBuf,
+    #[clap(short, long, parse(from_os_str))]
     script: Option<PathBuf>,
-    #[clap(long, default_value_t = 10000)]
+    #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
-    #[clap(long, default_value_t = 1)]
+    #[clap(long, default_value_t = 1, help = "Number of times to replay tracefile")]
     replay: u32,
-    #[clap(long, default_value_t = 60)]
+    #[clap(long, default_value_t = 60, help = "Interval to report statistics (s)")]
     stats_report_interval: u64,
     #[clap(long, default_value_t = 95)]
     stats_latency_percentage: usize,
@@ -132,7 +132,7 @@ async fn tokio_main() -> Result<()> {
         .build()
         .unwrap();
 
-    let file = File::open(args.trace_file)?;
+    let file = File::open(args.tracefile)?;
     let starts: Vec<_> = BufReader::new(file)
         .lines()
         .map(|l| Duration::from_micros(l.unwrap().parse::<u64>().unwrap()))
