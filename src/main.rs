@@ -34,6 +34,8 @@ struct Args {
     script: Option<PathBuf>,
     #[clap(long, default_value_t = 10000)]
     timeout: u64,
+    #[clap(long, default_value_t = 1)]
+    replay: u32,
     url: Url,
 }
 
@@ -76,28 +78,31 @@ async fn tokio_main() -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
 
     let base = Instant::now();
+    let duration = starts[starts.len() - 1];
     tokio::spawn(async move {
-        for start in starts {
-            let url = args.url.clone();
-            let request = if let Some(lua) = &lua {
-                build_request(&client, url, lua).unwrap()
-            } else {
-                client.post(url).body(compose_post())
-            };
-            let tx = tx.clone();
-            sleep_until(base + start).await;
-            tokio::spawn(async move {
-                let start = Instant::now();
-                let result = request.send().await;
-                let end = Instant::now();
+        for i in 0..args.replay {
+            for start in starts.iter().map(|&t| t + duration * i) {
+                let url = args.url.clone();
+                let request = if let Some(lua) = &lua {
+                    build_request(&client, url, lua).unwrap()
+                } else {
+                    client.post(url).body(compose_post())
+                };
+                let tx = tx.clone();
+                sleep_until(base + start).await;
+                tokio::spawn(async move {
+                    let start = Instant::now();
+                    let result = request.send().await;
+                    let end = Instant::now();
 
-                tx.send(match result {
-                    Ok(r) => r.error_for_status().map(|_| Trace { start, end }),
-                    Err(e) => Err(e),
-                })
-                .await
-                .unwrap();
-            });
+                    tx.send(match result {
+                        Ok(r) => r.error_for_status().map(|_| Trace { start, end }),
+                        Err(e) => Err(e),
+                    })
+                    .await
+                    .unwrap();
+                });
+            }
         }
     });
 
