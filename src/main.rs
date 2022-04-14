@@ -5,9 +5,11 @@ mod workload;
 extern crate log;
 
 use clap::Parser;
+use hdrhistogram::Histogram;
 use reqwest::{Client, Url};
 use serde_json::json;
 use std::{
+    collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
     path::PathBuf,
@@ -41,6 +43,8 @@ struct Args {
     stats_report_interval: u64,
     #[clap(long, default_value_t = 95)]
     stats_latency_percentage: usize,
+    #[clap(long, parse(from_os_str))]
+    summary: Option<PathBuf>,
     url: Url,
 }
 
@@ -48,6 +52,12 @@ struct Args {
 struct Trace {
     start: Instant,
     end: Instant,
+}
+
+impl Trace {
+    fn duration(&self) -> Duration {
+        self.end - self.start
+    }
 }
 
 struct BenchLog {
@@ -107,7 +117,7 @@ impl BenchLog {
     }
 
     fn latency_ms(&self, percentage: usize) -> f64 {
-        let mut latency: Vec<_> = self.traces.iter().map(|t| t.end - t.start).collect();
+        let mut latency: Vec<_> = self.traces.iter().map(|t| t.duration()).collect();
         latency.sort();
         latency
             .get((latency.len() * percentage - 1) / 100)
@@ -144,6 +154,7 @@ async fn tokio_main() -> Result<()> {
         None
     };
 
+    let mut latency_us_hist = Histogram::<u64>::new(3)?;
     let mut bench_log = BenchLog::new();
     let (tx, mut rx) = mpsc::channel(100);
 
@@ -179,7 +190,10 @@ async fn tokio_main() -> Result<()> {
     let mut last_report_time = Instant::now();
     while let Some(result) = rx.recv().await {
         match result {
-            Ok(trace) => bench_log.update_trace(trace),
+            Ok(trace) => {
+                latency_us_hist.record(trace.duration().as_micros() as u64)?;
+                bench_log.update_trace(trace);
+            }
             Err(e) => {
                 warn!("{}", e);
                 bench_log.update_err(e);
@@ -195,6 +209,20 @@ async fn tokio_main() -> Result<()> {
             println!("{}", stats);
             bench_log.clear();
         }
+    }
+
+    let tail_latency_ms: HashMap<_, _> = [0.5, 0.9, 0.95, 0.99, 0.999]
+        .into_iter()
+        .map(|quant| {
+            (
+                format!("{}", quant),
+                latency_us_hist.value_at_quantile(quant) as f64 / 1000.0,
+            )
+        })
+        .collect();
+    if let Some(path) = args.summary {
+        let file = File::create(path)?;
+        serde_json::to_writer(file, &tail_latency_ms)?;
     }
 
     Ok(())
