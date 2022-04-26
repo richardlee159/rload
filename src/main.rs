@@ -31,6 +31,8 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 #[derive(Parser)]
 #[clap(version)]
 struct Args {
+    #[clap(short, long, default_value_t = 1, help = "Number of threads to use")]
+    threads: usize,
     #[clap(short = 'f', long, parse(from_os_str))]
     tracefile: PathBuf,
     #[clap(short, long, parse(from_os_str))]
@@ -130,13 +132,16 @@ impl BenchLog {
 
 fn main() -> Result<()> {
     env_logger::init();
-    let rt = Builder::new_current_thread().enable_all().build()?;
-    rt.block_on(tokio_main())
+    let args = Args::parse();
+    let rt = Builder::new_multi_thread()
+        .worker_threads(args.threads)
+        .enable_all()
+        .build()?;
+    rt.block_on(tokio_main(args))
 }
 
 // #[tokio::main]
-async fn tokio_main() -> Result<()> {
-    let args = Args::parse();
+async fn tokio_main(args: Args) -> Result<()> {
     let client = Client::builder()
         .timeout(Duration::from_millis(args.timeout))
         .build()
