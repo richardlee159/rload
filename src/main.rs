@@ -1,20 +1,15 @@
+mod generator;
 mod luascript;
 mod workload;
 
 #[macro_use]
 extern crate log;
 
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use hdrhistogram::Histogram;
 use reqwest::{Client, Url};
 use serde_json::json;
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufRead, BufReader},
-    path::PathBuf,
-    time::Duration,
-};
+use std::{collections::HashMap, fs::File, path::PathBuf, time::Duration};
 use tokio::{
     runtime::Builder,
     sync::mpsc,
@@ -30,11 +25,16 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 
 #[derive(Parser)]
 #[clap(version)]
+#[clap(group(ArgGroup::new("generator").required(true).args(&["duration", "tracefile"])))]
 struct Args {
     #[clap(short, long, default_value_t = 1, help = "Number of threads to use")]
     threads: usize,
     #[clap(short = 'f', long, parse(from_os_str))]
-    tracefile: PathBuf,
+    tracefile: Option<PathBuf>,
+    #[clap(short, long, requires = "rate", help = "Duration of test (s)")]
+    duration: Option<u64>,
+    #[clap(short, long, help = "Number of requests per second")]
+    rate: Option<u64>,
     #[clap(short, long, parse(from_os_str))]
     script: Option<PathBuf>,
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
@@ -147,11 +147,13 @@ async fn tokio_main(args: Args) -> Result<()> {
         .build()
         .unwrap();
 
-    let file = File::open(args.tracefile)?;
-    let starts: Vec<_> = BufReader::new(file)
-        .lines()
-        .map(|l| Duration::from_micros(l.unwrap().parse::<u64>().unwrap()))
-        .collect();
+    let starts = if let Some(path) = args.tracefile {
+        generator::new_tracefile(path)
+    } else {
+        let duration = Duration::from_secs(args.duration.unwrap());
+        let rate = args.rate.unwrap();
+        generator::new_exp(duration, rate)
+    };
 
     let lua = if let Some(path) = args.script {
         Some(new_state(&path)?)
