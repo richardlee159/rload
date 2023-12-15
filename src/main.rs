@@ -40,8 +40,6 @@ struct Args {
     script: Option<PathBuf>,
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
-    #[clap(long, default_value_t = 1, help = "Number of times to replay tracefile")]
-    replay: u32,
     #[clap(long, default_value_t = 60, help = "Interval to report statistics (s)")]
     stats_report_interval: u64,
     #[clap(long, parse(from_os_str))]
@@ -164,27 +162,24 @@ async fn tokio_main(args: Args) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
 
     let base = Instant::now();
-    let duration = starts[starts.len() - 1];
     tokio::spawn(async move {
-        for i in 0..args.replay {
-            for start in starts.iter().map(|&t| t + duration * i) {
-                let url = args.url.clone();
-                let request = client.post(url).body(compose_post());
-                let tx = tx.clone();
-                time::sleep_until(base + start).await;
-                tokio::spawn(async move {
-                    let start = Instant::now();
-                    let result = request.send().await;
-                    let end = Instant::now();
+        for start in starts {
+            let url = args.url.clone();
+            let request = client.post(url).body(compose_post());
+            let tx = tx.clone();
+            time::sleep_until(base + start).await;
+            tokio::spawn(async move {
+                let start = Instant::now();
+                let result = request.send().await;
+                let end = Instant::now();
 
-                    tx.send(match result {
-                        Ok(r) => r.error_for_status().map(|_| Trace { start, end }),
-                        Err(e) => Err(e),
-                    })
-                    .await
-                    .unwrap();
-                });
-            }
+                tx.send(match result {
+                    Ok(r) => r.error_for_status().map(|_| Trace { start, end }),
+                    Err(e) => Err(e),
+                })
+                .await
+                .unwrap();
+            });
         }
     });
 
