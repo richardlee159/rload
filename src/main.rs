@@ -186,8 +186,13 @@ async fn tokio_main(args: Args) -> Result<()> {
     );
     let percentages = [50.0, 90.0, 95.0, 99.0, 99.9, 100.0];
     for p in percentages {
-        print!("{}%: {}, ", p, latency_us_hist.value_at_percentile(p));
+        print!("{}%\t", p);
     }
+    println!();
+    for p in percentages {
+        print!("{}\t", latency_us_hist.value_at_percentile(p));
+    }
+    println!();
 
     Ok(())
 }
