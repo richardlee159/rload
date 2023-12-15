@@ -1,5 +1,4 @@
 mod generator;
-mod luascript;
 mod workload;
 
 #[macro_use]
@@ -21,10 +20,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{
-    luascript::{build_request, new_state},
-    workload::compose_post,
-};
+use crate::workload::compose_post;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -163,12 +159,6 @@ async fn tokio_main(args: Args) -> Result<()> {
         generator::new_exp(duration, rate)
     };
 
-    let lua = if let Some(path) = args.script {
-        Some(new_state(&path)?)
-    } else {
-        None
-    };
-
     let mut latency_us_hist = Histogram::<u64>::new(3)?;
     let bench_log = Arc::new(Mutex::new(BenchLog::new()));
     let (tx, mut rx) = mpsc::channel(100);
@@ -179,11 +169,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         for i in 0..args.replay {
             for start in starts.iter().map(|&t| t + duration * i) {
                 let url = args.url.clone();
-                let request = if let Some(lua) = &lua {
-                    build_request(&client, url, lua).unwrap()
-                } else {
-                    client.post(url).body(compose_post())
-                };
+                let request = client.post(url).body(compose_post());
                 let tx = tx.clone();
                 time::sleep_until(base + start).await;
                 tokio::spawn(async move {
