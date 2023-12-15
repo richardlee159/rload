@@ -28,8 +28,6 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 #[clap(version)]
 #[clap(group(ArgGroup::new("generator").required(true).args(&["duration", "tracefile"])))]
 struct Args {
-    #[clap(short, long, default_value_t = 1, help = "Number of threads to use")]
-    threads: usize,
     #[clap(short = 'f', long, parse(from_os_str))]
     tracefile: Option<PathBuf>,
     #[clap(short, long, requires = "rate", help = "Duration of test (s)")]
@@ -133,10 +131,7 @@ impl BenchLog {
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
-    let rt = Builder::new_multi_thread()
-        .worker_threads(args.threads)
-        .enable_all()
-        .build()?;
+    let rt = Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(tokio_main(args))
 }
 
