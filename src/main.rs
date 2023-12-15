@@ -7,13 +7,7 @@ extern crate log;
 use clap::{ArgGroup, Parser};
 use hdrhistogram::Histogram;
 use reqwest::{Client, Url};
-use std::{
-    collections::HashMap,
-    fs::File,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, fs::File, path::PathBuf, time::Duration};
 use tokio::{
     runtime::Builder,
     sync::mpsc,
@@ -36,12 +30,8 @@ struct Args {
     rate: Option<u64>,
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
-    #[clap(long, default_value_t = 60, help = "Interval to report statistics (s)")]
-    stats_report_interval: u64,
     #[clap(long, parse(from_os_str))]
     summary: Option<PathBuf>,
-    #[clap(long, name = "CSV_PREFIX")]
-    csv: Option<String>,
     url: Url,
 }
 
@@ -151,7 +141,7 @@ async fn tokio_main(args: Args) -> Result<()> {
     };
 
     let mut latency_us_hist = Histogram::<u64>::new(3)?;
-    let bench_log = Arc::new(Mutex::new(BenchLog::new()));
+    let mut bench_log = BenchLog::new();
     let (tx, mut rx) = mpsc::channel(100);
 
     let base = Instant::now();
@@ -177,74 +167,15 @@ async fn tokio_main(args: Args) -> Result<()> {
     });
 
     let percentages = [50.0, 75.0, 90.0, 95.0, 98.0, 99.0, 99.9, 100.0];
-
-    if let Some(csv_prefix) = args.csv {
-        let bench_log = bench_log.clone();
-        tokio::spawn(async move {
-            let path = format!("{}_stats_history.csv", csv_prefix);
-            let mut wtr = csv::Writer::from_path(path).unwrap();
-
-            let headers = [
-                "Timestamp",
-                "Requests",
-                "Failures",
-                "Total Requests",
-                "Total Failures",
-            ]
-            .into_iter()
-            .map(|h| h.to_string())
-            .chain(percentages.map(|p| format!("{}%", p)));
-            wtr.write_record(headers).unwrap();
-            wtr.flush().unwrap();
-
-            let mut total_requests = 0;
-            let mut total_failures = 0;
-
-            let mut interval =
-                time::interval_at(base, Duration::from_secs(args.stats_report_interval));
-            loop {
-                interval.tick().await;
-
-                let mut bench_log_guard = bench_log.lock().unwrap();
-                let timestamp = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as usize;
-                let successes = bench_log_guard.successes();
-                let errors = bench_log_guard.errors();
-                let latencies = bench_log_guard.latencies(&percentages);
-                bench_log_guard.clear();
-
-                let requests = successes + errors;
-                let failures = errors;
-                total_requests += requests;
-                total_failures += failures;
-
-                let bodies = [
-                    timestamp,
-                    requests,
-                    failures,
-                    total_requests,
-                    total_failures,
-                ]
-                .into_iter()
-                .map(|n| n.to_string())
-                .chain(latencies.into_iter().map(|t| t.as_millis().to_string()));
-                wtr.write_record(bodies).unwrap();
-                wtr.flush().unwrap();
-            }
-        });
-    }
-
     while let Some(result) = rx.recv().await {
         match result {
             Ok(trace) => {
                 latency_us_hist.record(trace.duration().as_micros() as u64)?;
-                bench_log.lock().unwrap().update_trace(trace);
+                bench_log.update_trace(trace);
             }
             Err(e) => {
                 warn!("{}", e);
-                bench_log.lock().unwrap().update_err(e);
+                bench_log.update_err(e);
             }
         }
     }
@@ -258,10 +189,12 @@ async fn tokio_main(args: Args) -> Result<()> {
             )
         })
         .collect();
-    if let Some(path) = args.summary {
-        let file = File::create(path)?;
-        serde_json::to_writer(file, &tail_latency_ms)?;
-    }
+    println!(
+        "Successes: {}, Errors: {}",
+        bench_log.successes(),
+        bench_log.errors()
+    );
+    serde_json::to_writer(std::io::stdout(), &tail_latency_ms)?;
 
     Ok(())
 }
