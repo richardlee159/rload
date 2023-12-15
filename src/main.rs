@@ -7,7 +7,7 @@ extern crate log;
 use clap::{ArgGroup, Parser};
 use hdrhistogram::Histogram;
 use reqwest::{Client, Url};
-use std::{path::PathBuf, time::Duration};
+use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 use tokio::{
     runtime::Builder,
     sync::mpsc,
@@ -31,7 +31,7 @@ struct Args {
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
     #[clap(long, parse(from_os_str))]
-    summary: Option<PathBuf>,
+    results_path: Option<PathBuf>,
     url: Url,
 }
 
@@ -176,6 +176,19 @@ async fn tokio_main(args: Args) -> Result<()> {
                 warn!("{}", e);
                 bench_log.update_err(e);
             }
+        }
+    }
+
+    if let Some(results_path) = args.results_path {
+        let mut file = File::create(results_path)?;
+        let base_start = bench_log.traces[0].start;
+        for trace in &bench_log.traces {
+            writeln!(
+                file,
+                "{}\t{}",
+                (trace.start - base_start).as_micros(),
+                trace.duration().as_micros()
+            )?;
         }
     }
 
