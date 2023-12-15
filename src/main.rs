@@ -20,7 +20,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::workload::compose_post;
+use crate::workload::matmul;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -165,7 +165,7 @@ async fn tokio_main(args: Args) -> Result<()> {
     tokio::spawn(async move {
         for start in starts {
             let url = args.url.clone();
-            let request = client.post(url).body(compose_post());
+            let request = client.post(url).body(matmul(1));
             let tx = tx.clone();
             time::sleep_until(base + start).await;
             tokio::spawn(async move {
