@@ -7,7 +7,7 @@ extern crate log;
 use clap::{ArgGroup, Parser};
 use hdrhistogram::Histogram;
 use reqwest::{Client, Url};
-use std::{collections::HashMap, fs::File, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 use tokio::{
     runtime::Builder,
     sync::mpsc,
@@ -166,7 +166,6 @@ async fn tokio_main(args: Args) -> Result<()> {
         }
     });
 
-    let percentages = [50.0, 75.0, 90.0, 95.0, 98.0, 99.0, 99.9, 100.0];
     while let Some(result) = rx.recv().await {
         match result {
             Ok(trace) => {
@@ -180,21 +179,15 @@ async fn tokio_main(args: Args) -> Result<()> {
         }
     }
 
-    let tail_latency_ms: HashMap<_, _> = percentages
-        .into_iter()
-        .map(|p| {
-            (
-                format!("{}%", p),
-                latency_us_hist.value_at_percentile(p) as f64 / 1000.0,
-            )
-        })
-        .collect();
     println!(
         "Successes: {}, Errors: {}",
         bench_log.successes(),
         bench_log.errors()
     );
-    serde_json::to_writer(std::io::stdout(), &tail_latency_ms)?;
+    let percentages = [50.0, 90.0, 95.0, 99.0, 99.9, 100.0];
+    for p in percentages {
+        print!("{}%: {}, ", p, latency_us_hist.value_at_percentile(p));
+    }
 
     Ok(())
 }
