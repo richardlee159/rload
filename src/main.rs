@@ -36,8 +36,6 @@ struct Args {
     duration: Option<u64>,
     #[clap(short, long, help = "Number of requests per second")]
     rate: Option<u64>,
-    #[clap(short, long, parse(from_os_str))]
-    script: Option<PathBuf>,
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
     #[clap(long, default_value_t = 60, help = "Interval to report statistics (s)")]
