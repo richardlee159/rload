@@ -137,7 +137,7 @@ async fn tokio_main(args: Args) -> Result<()> {
     } else {
         let duration = Duration::from_secs(args.duration.unwrap());
         let rate = args.rate.unwrap();
-        generator::new_exp(duration, rate)
+        generator::new_const(duration, rate)
     };
 
     let mut latency_us_hist = Histogram::<u64>::new(3)?;
