@@ -5,7 +5,6 @@ mod workload;
 extern crate log;
 
 use clap::{ArgGroup, Parser};
-use hdrhistogram::Histogram;
 use reqwest::{Client, Url};
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 use tokio::{
@@ -140,7 +139,6 @@ async fn tokio_main(args: Args) -> Result<()> {
         generator::new_const(duration, rate)
     };
 
-    let mut latency_us_hist = Histogram::<u64>::new(3)?;
     let mut bench_log = BenchLog::new();
     let (tx, mut rx) = mpsc::channel(100);
 
@@ -169,7 +167,6 @@ async fn tokio_main(args: Args) -> Result<()> {
     while let Some(result) = rx.recv().await {
         match result {
             Ok(trace) => {
-                latency_us_hist.record(trace.duration().as_micros() as u64)?;
                 bench_log.update_trace(trace);
             }
             Err(e) => {
@@ -198,12 +195,13 @@ async fn tokio_main(args: Args) -> Result<()> {
         bench_log.errors()
     );
     let percentages = [50.0, 90.0, 95.0, 99.0, 99.9, 100.0];
+    let latencies = bench_log.latencies(&percentages);
     for p in percentages {
         print!("{}%\t", p);
     }
     println!();
-    for p in percentages {
-        print!("{}\t", latency_us_hist.value_at_percentile(p));
+    for l in latencies {
+        print!("{}\t", l.as_micros());
     }
     println!();
 
