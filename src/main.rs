@@ -21,7 +21,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync
 #[clap(version)]
 #[clap(group(ArgGroup::new("generator").required(true).args(&["duration", "tracefile"])))]
 struct Args {
-    #[clap(short = 'f', long, parse(from_os_str))]
+    #[clap(short = 'f', long)]
     tracefile: Option<PathBuf>,
     #[clap(short, long, requires = "rate", help = "Duration of test (s)")]
     duration: Option<u64>,
@@ -29,7 +29,7 @@ struct Args {
     rate: Option<u64>,
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
-    #[clap(long, parse(from_os_str))]
+    #[clap(long)]
     results_path: Option<PathBuf>,
     url: Url,
 }
