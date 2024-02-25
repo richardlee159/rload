@@ -5,7 +5,7 @@ mod workload;
 extern crate log;
 
 use clap::{ArgGroup, Parser};
-use reqwest::{Client, Url};
+use reqwest::{Client, StatusCode, Url};
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 use tokio::{
     runtime::Builder,
@@ -35,75 +35,56 @@ struct Args {
 }
 
 #[derive(Debug)]
-struct Trace {
+struct Record {
     start: Instant,
     end: Instant,
+    url: String,
+    timeout: bool,
+    error: bool,
+    status: Option<StatusCode>,
 }
 
-impl Trace {
+impl Record {
     fn duration(&self) -> Duration {
         self.end - self.start
     }
 }
 
 struct BenchLog {
-    traces: Vec<Trace>,
+    records: Vec<Record>,
     timeouts: usize,
-    status_errors: usize,
-    connect_errors: usize,
-    other_errors: usize,
+    errors: usize,
 }
 
 impl BenchLog {
     fn new() -> Self {
         Self {
-            traces: Vec::new(),
+            records: Vec::new(),
             timeouts: 0,
-            status_errors: 0,
-            connect_errors: 0,
-            other_errors: 0,
+            errors: 0,
         }
     }
 
-    fn update_trace(&mut self, trace: Trace) {
-        self.traces.push(trace);
-    }
-
-    fn update_err(&mut self, err: reqwest::Error) {
-        match err {
-            e if e.is_timeout() => {
-                self.timeouts += 1;
-            }
-            e if e.is_status() => {
-                self.status_errors += 1;
-            }
-            e if e.is_connect() => {
-                self.connect_errors += 1;
-            }
-            _ => {
-                self.other_errors += 1;
-            }
+    fn add_record(&mut self, record: Record) {
+        if record.timeout {
+            self.timeouts += 1;
         }
+        if record.error {
+            self.errors += 1;
+        }
+        self.records.push(record);
     }
 
-    fn clear(&mut self) {
-        self.traces.clear();
-        self.timeouts = 0;
-        self.status_errors = 0;
-        self.connect_errors = 0;
-        self.other_errors = 0;
-    }
-
-    fn successes(&self) -> usize {
-        self.traces.len()
+    fn total(&self) -> usize {
+        self.records.len()
     }
 
     fn errors(&self) -> usize {
-        self.timeouts + self.status_errors + self.connect_errors + self.other_errors
+        self.timeouts + self.errors
     }
 
     fn latencies(&self, percentages: &[f64]) -> Vec<Duration> {
-        let mut latency: Vec<_> = self.traces.iter().map(|t| t.duration()).collect();
+        let mut latency: Vec<_> = self.records.iter().map(|t| t.duration()).collect();
         latency.sort();
         percentages
             .iter()
@@ -145,8 +126,8 @@ async fn tokio_main(args: Args) -> Result<()> {
     let base = Instant::now();
     tokio::spawn(async move {
         for start in starts {
-            let url = args.url.clone();
-            let request = client.post(url).body(matmul(1));
+            let url = args.url.to_string();
+            let request = client.post(&url).body(matmul(1));
             let tx = tx.clone();
             time::sleep_until(base + start).await;
             tokio::spawn(async move {
@@ -154,44 +135,54 @@ async fn tokio_main(args: Args) -> Result<()> {
                 let result = request.send().await;
                 let end = Instant::now();
 
-                tx.send(match result {
-                    Ok(r) => r.error_for_status().map(|_| Trace { start, end }),
-                    Err(e) => Err(e),
-                })
-                .await
-                .unwrap();
+                let mut record = Record {
+                    start,
+                    end,
+                    url,
+                    timeout: false,
+                    error: false,
+                    status: None,
+                };
+                match result.and_then(|r| r.error_for_status()) {
+                    Ok(r) => {
+                        record.status = Some(r.status());
+                    }
+                    Err(e) => {
+                        if e.is_timeout() {
+                            record.timeout = true;
+                            debug!("Request timed out");
+                        } else {
+                            record.error = true;
+                            record.status = e.status();
+                            warn!("Request error: {}", e);
+                        }
+                    }
+                }
+                tx.send(record).await.unwrap();
             });
         }
     });
 
-    while let Some(result) = rx.recv().await {
-        match result {
-            Ok(trace) => {
-                bench_log.update_trace(trace);
-            }
-            Err(e) => {
-                warn!("{}", e);
-                bench_log.update_err(e);
-            }
-        }
+    while let Some(record) = rx.recv().await {
+        bench_log.add_record(record);
     }
 
     if let Some(results_path) = args.results_path {
         let mut file = File::create(results_path)?;
-        let base_start = bench_log.traces[0].start;
-        for trace in &bench_log.traces {
+        let base_start = bench_log.records[0].start;
+        for record in &bench_log.records {
             writeln!(
                 file,
                 "{}\t{}",
-                (trace.start - base_start).as_micros(),
-                trace.duration().as_micros()
+                (record.start - base_start).as_micros(),
+                record.duration().as_micros()
             )?;
         }
     }
 
     println!(
-        "Successes: {}, Errors: {}",
-        bench_log.successes(),
+        "Total: {}, Errors: {}",
+        bench_log.total(),
         bench_log.errors()
     );
     let percentages = [50.0, 90.0, 95.0, 99.0, 99.9, 100.0];
