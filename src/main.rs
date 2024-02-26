@@ -248,6 +248,7 @@ async fn tokio_main(args: Args) -> Result<()> {
                 tx.send(record).await.unwrap();
             });
         }
+        info!("Started all requests in {:?}", base.elapsed());
     });
 
     while let Some(record) = rx.recv().await {
@@ -274,17 +275,21 @@ async fn tokio_main(args: Args) -> Result<()> {
         }
     }
 
-    println!(
-        "Total: {}, Errors: {}",
-        bench_log.total(),
-        bench_log.errors()
-    );
+    let num_total = bench_log.total();
+    let num_errors = bench_log.errors();
+    println!("Total: {}, Errors: {}", num_total, num_errors);
     let percentages = [50.0, 90.0, 95.0, 99.0, 99.9, 100.0];
     let latencies = bench_log.latencies(&percentages);
     println!("Latency percentiles (in us):");
     for (p, l) in percentages.into_iter().zip(latencies) {
         println!("{:5}% -- {}\t", p, l.as_micros());
     }
+    // required by the experiment script
+    println!(
+        "error%=\"{}\" goodput=\"{}\"",
+        num_errors as f64 / num_total as f64,
+        (num_total - num_errors) as f64 / args.duration as f64,
+    );
 
     Ok(())
 }
