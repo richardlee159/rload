@@ -138,9 +138,9 @@ struct BenchLog {
 }
 
 impl BenchLog {
-    fn new() -> Self {
+    fn new(num_records: usize) -> Self {
         Self {
-            records: Vec::new(),
+            records: Vec::with_capacity(num_records),
             timeouts: 0,
             errors: 0,
         }
@@ -189,14 +189,14 @@ fn main() -> Result<()> {
 // #[tokio::main]
 async fn tokio_main(args: Args) -> Result<()> {
     let mut url_gen = UrlGenerator::new(&args.ip, args.hot_percent);
-    let starts = generator::new_const(Duration::from_secs(args.duration), args.rate);
 
     let client = Client::builder()
         .timeout(Duration::from_millis(args.timeout))
         .build()
         .unwrap();
 
-    let mut bench_log = BenchLog::new();
+    let starts = generator::new_const(Duration::from_secs(args.duration), args.rate);
+    let mut bench_log = BenchLog::new(starts.len());
     let (tx, mut rx) = mpsc::channel(100);
 
     tokio::spawn(async move {
