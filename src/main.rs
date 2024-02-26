@@ -7,6 +7,7 @@ extern crate log;
 use clap::{Parser, ValueEnum};
 use reqwest::{Client, StatusCode};
 use std::{
+    fmt,
     fs::File,
     io::Write,
     path::PathBuf,
@@ -23,30 +24,50 @@ use crate::workload::matmul;
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Copy, ValueEnum)]
-enum RequestFormat {
+enum RequestType {
     Matmul,
     Compute,
     Io,
 }
 
+impl fmt::Display for RequestType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_possible_value().unwrap().get_name())
+    }
+}
+
 #[derive(Parser)]
-#[clap(version)]
 struct Args {
-    #[clap(long)]
+    /// IP address to issue requests to
+    #[arg(long, default_value_t = String::from("localhost"))]
     ip: String,
-    #[clap(short, long, requires = "rate", help = "Duration of test (s)")]
+
+    /// Number of seconds to run measurement for
+    #[arg(short, long, default_value_t = 1)]
     duration: u64,
-    #[clap(short, long, help = "Number of requests per second")]
+
+    /// Number of requests per second to ussue
+    #[arg(short, long, default_value_t = 1)]
     rate: u64,
-    #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
+
+    /// Request timeout in milliseconds
+    #[arg(long, default_value_t = 10000)]
     timeout: u64,
-    #[clap(long)]
-    results_path: Option<PathBuf>,
-    #[clap(long)]
-    request_format: RequestFormat,
-    #[clap(long)]
+
+    /// Path to output results
+    #[arg(long)]
+    output_file: Option<PathBuf>,
+
+    /// What kind of requests to send
+    #[arg(long, default_value_t = RequestType::Matmul)]
+    request_type: RequestType,
+
+    /// Size (N) of the NxN matrix to multiply / number of iterations to compute
+    #[arg(long, default_value_t = 128)]
     input_size: u64,
-    #[clap(long)]
+
+    /// The average percentage of hot requests to issue
+    #[arg(long, default_value_t = 1.0)]
     hot_percent: f64,
 }
 
@@ -70,7 +91,7 @@ impl UrlGenerator {
         }
     }
 
-    fn next(&mut self, request_format: RequestFormat) -> String {
+    fn next(&mut self, request_type: RequestType) -> String {
         self.request_counter += self.hot_percent;
         let url = if self.request_counter >= 1.0 {
             self.request_counter -= 1.0;
@@ -81,10 +102,10 @@ impl UrlGenerator {
         format!(
             "{}/{}",
             url,
-            match request_format {
-                RequestFormat::Matmul => "matmul",
-                RequestFormat::Compute => "compute",
-                RequestFormat::Io => "io",
+            match request_type {
+                RequestType::Matmul => "matmul",
+                RequestType::Compute => "compute",
+                RequestType::Io => "io",
             }
         )
     }
@@ -181,11 +202,11 @@ async fn tokio_main(args: Args) -> Result<()> {
     tokio::spawn(async move {
         let base = Instant::now();
         for start in starts {
-            let url = url_gen.next(args.request_format);
-            let request = client.post(&url).body(match args.request_format {
-                RequestFormat::Matmul => matmul(args.input_size),
-                RequestFormat::Compute => vec![],
-                RequestFormat::Io => vec![],
+            let url = url_gen.next(args.request_type);
+            let request = client.post(&url).body(match args.request_type {
+                RequestType::Matmul => matmul(args.input_size),
+                RequestType::Compute => vec![],
+                RequestType::Io => vec![],
             });
 
             let tx = tx.clone();
@@ -227,7 +248,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         bench_log.add_record(record);
     }
 
-    if let Some(results_path) = args.results_path {
+    if let Some(results_path) = args.output_file {
         let mut file = File::create(results_path)?;
         writeln!(
             file,
