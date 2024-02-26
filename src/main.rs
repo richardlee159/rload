@@ -210,7 +210,13 @@ async fn tokio_main(args: Args) -> Result<()> {
             });
 
             let tx = tx.clone();
-            time::sleep_until(base + start).await;
+            let next = base + start;
+            if next.elapsed() > Duration::from_millis(100) {
+                warn!("Could not keep up with needed rate, canceling experiment");
+                break;
+            }
+            time::sleep_until(next).await;
+
             tokio::spawn(async move {
                 let start = SystemTime::now();
                 let result = request.send().await;
