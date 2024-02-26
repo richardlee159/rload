@@ -188,8 +188,8 @@ async fn tokio_main(args: Args) -> Result<()> {
     let mut bench_log = BenchLog::new();
     let (tx, mut rx) = mpsc::channel(100);
 
-    let base = Instant::now();
     tokio::spawn(async move {
+        let base = Instant::now();
         for start in starts {
             let url = url_gen.next(args.request_format);
             let request = client.post(&url).body(match args.request_format {
