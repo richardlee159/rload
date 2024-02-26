@@ -19,7 +19,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::workload::matmul;
+use crate::workload::{matmul, matmul_checksum};
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -189,6 +189,11 @@ fn main() -> Result<()> {
 // #[tokio::main]
 async fn tokio_main(args: Args) -> Result<()> {
     let mut url_gen = UrlGenerator::new(&args.ip, args.hot_percent);
+    let expected_checksum = match args.request_type {
+        RequestType::Matmul => matmul_checksum(args.input_size),
+        RequestType::Compute => 0,
+        RequestType::Io => 0,
+    };
 
     let client = Client::builder()
         .timeout(Duration::from_millis(args.timeout))
@@ -233,6 +238,12 @@ async fn tokio_main(args: Args) -> Result<()> {
                 match result.and_then(|r| r.error_for_status()) {
                     Ok(r) => {
                         record.status = Some(r.status());
+                        let body = r.bytes().await.unwrap();
+                        assert_eq!(body.len(), 8);
+                        let mut buf = [0u8; 8];
+                        buf.copy_from_slice(&body[..8]);
+                        let checksum = u64::from_be_bytes(buf);
+                        assert_eq!(checksum, expected_checksum);
                     }
                     Err(e) => {
                         if e.is_timeout() {
