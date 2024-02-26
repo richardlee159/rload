@@ -201,6 +201,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         .unwrap();
 
     let starts = generator::new_const(Duration::from_secs(args.duration), args.rate);
+    let num_expected = starts.len();
     let mut bench_log = BenchLog::new(starts.len());
     let (tx, mut rx) = mpsc::channel(100);
 
@@ -296,6 +297,9 @@ async fn tokio_main(args: Args) -> Result<()> {
         println!("{:5}% -- {}\t", p, l.as_micros());
     }
     // required by the experiment script
+    if num_total < num_expected {
+        return Err("Could not keep up".into());
+    }
     println!(
         "error%=\"{}\" goodput=\"{}\"",
         num_errors as f64 / num_total as f64,
