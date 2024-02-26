@@ -4,7 +4,7 @@ mod workload;
 #[macro_use]
 extern crate log;
 
-use clap::{ArgGroup, Parser, ValueEnum};
+use clap::{Parser, ValueEnum};
 use reqwest::{Client, StatusCode};
 use std::{
     fs::File,
@@ -31,16 +31,13 @@ enum RequestFormat {
 
 #[derive(Parser)]
 #[clap(version)]
-#[clap(group(ArgGroup::new("generator").required(true).args(&["duration", "tracefile"])))]
 struct Args {
     #[clap(long)]
     ip: String,
-    #[clap(short = 'f', long)]
-    tracefile: Option<PathBuf>,
     #[clap(short, long, requires = "rate", help = "Duration of test (s)")]
-    duration: Option<u64>,
+    duration: u64,
     #[clap(short, long, help = "Number of requests per second")]
-    rate: Option<u64>,
+    rate: u64,
     #[clap(long, default_value_t = 10000, help = "Request timeout (ms)")]
     timeout: u64,
     #[clap(long)]
@@ -171,19 +168,12 @@ fn main() -> Result<()> {
 // #[tokio::main]
 async fn tokio_main(args: Args) -> Result<()> {
     let mut url_gen = UrlGenerator::new(&args.ip, args.hot_percent);
+    let starts = generator::new_const(Duration::from_secs(args.duration), args.rate);
 
     let client = Client::builder()
         .timeout(Duration::from_millis(args.timeout))
         .build()
         .unwrap();
-
-    let starts = if let Some(path) = args.tracefile {
-        generator::new_tracefile(path)
-    } else {
-        let duration = Duration::from_secs(args.duration.unwrap());
-        let rate = args.rate.unwrap();
-        generator::new_const(duration, rate)
-    };
 
     let mut bench_log = BenchLog::new();
     let (tx, mut rx) = mpsc::channel(100);
