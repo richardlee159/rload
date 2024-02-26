@@ -281,14 +281,10 @@ async fn tokio_main(args: Args) -> Result<()> {
     );
     let percentages = [50.0, 90.0, 95.0, 99.0, 99.9, 100.0];
     let latencies = bench_log.latencies(&percentages);
-    for p in percentages {
-        print!("{}%\t", p);
+    println!("Latency percentiles (in us):");
+    for (p, l) in percentages.into_iter().zip(latencies) {
+        println!("{:5}% -- {}\t", p, l.as_micros());
     }
-    println!();
-    for l in latencies {
-        print!("{}\t", l.as_micros());
-    }
-    println!();
 
     Ok(())
 }
