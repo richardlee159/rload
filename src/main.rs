@@ -230,13 +230,21 @@ async fn tokio_main(args: Args) -> Result<()> {
 
     if let Some(results_path) = args.results_path {
         let mut file = File::create(results_path)?;
+        writeln!(
+            file,
+            "instance,startTime,responseTime,connectionTimeout,functionTimeout,statusCode",
+        )?;
         let base_start = bench_log.records[0].start;
         for record in &bench_log.records {
             writeln!(
                 file,
-                "{}\t{}",
+                "{},{},{},{},{},{}",
+                record.url,
                 (record.start - base_start).as_micros(),
-                record.duration().as_micros()
+                record.duration().as_micros(),
+                record.timeout,
+                record.error,
+                record.status.map_or(0, |s| s.as_u16()),
             )?;
         }
     }
