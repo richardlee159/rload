@@ -6,7 +6,12 @@ extern crate log;
 
 use clap::{ArgGroup, Parser, ValueEnum};
 use reqwest::{Client, StatusCode};
-use std::{fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{
+    fs::File,
+    io::Write,
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::{
     runtime::Builder,
     sync::mpsc,
@@ -90,8 +95,8 @@ impl UrlGenerator {
 
 #[derive(Debug)]
 struct Record {
-    start: Instant,
-    end: Instant,
+    start: SystemTime,
+    end: SystemTime,
     url: String,
     timeout: bool,
     error: bool,
@@ -99,8 +104,12 @@ struct Record {
 }
 
 impl Record {
+    fn start_time(&self) -> Duration {
+        self.start.duration_since(UNIX_EPOCH).unwrap()
+    }
+
     fn duration(&self) -> Duration {
-        self.end - self.start
+        self.end.duration_since(self.start).unwrap()
     }
 }
 
@@ -192,9 +201,9 @@ async fn tokio_main(args: Args) -> Result<()> {
             let tx = tx.clone();
             time::sleep_until(base + start).await;
             tokio::spawn(async move {
-                let start = Instant::now();
+                let start = SystemTime::now();
                 let result = request.send().await;
-                let end = Instant::now();
+                let end = SystemTime::now();
 
                 let mut record = Record {
                     start,
@@ -234,13 +243,12 @@ async fn tokio_main(args: Args) -> Result<()> {
             file,
             "instance,startTime,responseTime,connectionTimeout,functionTimeout,statusCode",
         )?;
-        let base_start = bench_log.records[0].start;
         for record in &bench_log.records {
             writeln!(
                 file,
                 "{},{},{},{},{},{}",
                 record.url,
-                (record.start - base_start).as_micros(),
+                record.start_time().as_micros(),
                 record.duration().as_micros(),
                 record.timeout,
                 record.error,
