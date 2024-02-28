@@ -11,13 +11,9 @@ use std::{
     fs::File,
     io::Write,
     path::PathBuf,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{
-    runtime::Builder,
-    sync::mpsc,
-    time::{self, Instant},
-};
+use tokio::{runtime::Builder, sync::mpsc};
 
 use crate::workload::{matmul, matmul_checksum};
 
@@ -204,10 +200,25 @@ async fn tokio_main(args: Args) -> Result<()> {
     let num_expected = starts.len();
     let mut bench_log = BenchLog::new(starts.len());
     let (tx, mut rx) = mpsc::channel(100);
+    let (timer_tx, mut timer_rx) = mpsc::channel(100);
 
-    tokio::spawn(async move {
+    tokio::task::spawn_blocking(move || {
         let base = Instant::now();
         for start in starts {
+            let next = base + start;
+            if next.elapsed() > Duration::from_millis(100) {
+                warn!("Could not keep up with needed rate, canceling experiment");
+                break;
+            }
+            // higher precision than tokio::time::sleep
+            std::thread::sleep(next - Instant::now());
+            timer_tx.blocking_send(()).unwrap();
+        }
+        info!("Started all requests in {:?}", base.elapsed());
+    });
+
+    tokio::spawn(async move {
+        while let Some(_) = timer_rx.recv().await {
             let url = url_gen.next(args.request_type);
             let request = client.post(&url).body(match args.request_type {
                 RequestType::Matmul => matmul(args.input_size),
@@ -216,13 +227,6 @@ async fn tokio_main(args: Args) -> Result<()> {
             });
 
             let tx = tx.clone();
-            let next = base + start;
-            if next.elapsed() > Duration::from_millis(100) {
-                warn!("Could not keep up with needed rate, canceling experiment");
-                break;
-            }
-            time::sleep_until(next).await;
-
             tokio::spawn(async move {
                 let start = SystemTime::now();
                 let result = request.send().await;
@@ -260,7 +264,6 @@ async fn tokio_main(args: Args) -> Result<()> {
                 tx.send(record).await.unwrap();
             });
         }
-        info!("Started all requests in {:?}", base.elapsed());
     });
 
     while let Some(record) = rx.recv().await {
