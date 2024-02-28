@@ -4,6 +4,7 @@ mod workload;
 #[macro_use]
 extern crate log;
 
+use crate::generator::ConstGen;
 use clap::{Parser, ValueEnum};
 use reqwest::{Client, StatusCode};
 use std::{
@@ -180,9 +181,9 @@ async fn tokio_main(args: Args) -> Result<()> {
         .build()
         .unwrap();
 
-    let starts = generator::new_const(Duration::from_secs(args.duration), args.rate);
-    let num_expected = starts.len();
-    let mut bench_log = BenchLog::new(starts.len());
+    let starts = ConstGen::new(Duration::from_secs(args.duration), args.rate);
+    let num_expected = starts.expected_len();
+    let mut bench_log = BenchLog::new(num_expected + 1);
     let (tx, mut rx) = mpsc::channel(100);
     let (timer_tx, mut timer_rx) = mpsc::channel(100);
 
