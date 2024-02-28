@@ -181,7 +181,10 @@ async fn tokio_main(args: Args) -> Result<()> {
         .build()
         .unwrap();
 
-    let starts = ConstGen::new(Duration::from_secs(args.duration), args.rate);
+    let rate_per_sec = std::iter::repeat(args.rate)
+        .take(args.duration as usize)
+        .collect();
+    let starts = ConstGen::new(rate_per_sec);
     let num_expected = starts.expected_len();
     let mut bench_log = BenchLog::new(num_expected + 1);
     let (tx, mut rx) = mpsc::channel(100);

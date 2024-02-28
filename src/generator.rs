@@ -1,24 +1,20 @@
 use std::time::Duration;
 
 pub struct ConstGen {
+    rate_per_sec: Vec<u64>,
     now: Duration,
-    duration: Duration,
-    iat: Duration,
-    expected: usize,
 }
 
 impl ConstGen {
-    pub fn new(duration: Duration, rate: u64) -> Self {
+    pub fn new(rate_per_sec: Vec<u64>) -> Self {
         Self {
+            rate_per_sec,
             now: Duration::ZERO,
-            duration,
-            iat: Duration::from_secs_f64(1.0 / rate as f64),
-            expected: (duration.as_secs() * rate) as usize,
         }
     }
 
     pub fn expected_len(&self) -> usize {
-        self.expected
+        self.rate_per_sec.iter().sum::<u64>() as _
     }
 }
 
@@ -26,8 +22,11 @@ impl Iterator for ConstGen {
     type Item = Duration;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.now < self.duration {
-            self.now += self.iat;
+        let now_sec = self.now.as_secs() as usize;
+        if now_sec < self.rate_per_sec.len() {
+            let rate = self.rate_per_sec[now_sec];
+            let iat = Duration::from_secs_f64(1.0 / rate as f64);
+            self.now += iat;
             Some(self.now)
         } else {
             None
