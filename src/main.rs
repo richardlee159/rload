@@ -15,8 +15,6 @@ use std::{
 };
 use tokio::{runtime::Builder, sync::mpsc};
 
-use crate::workload::{matmul, matmul_checksum};
-
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -62,48 +60,38 @@ struct Args {
     #[arg(long, default_value_t = 128)]
     input_size: u64,
 
+    /// The IP of the HTTP storage server (used only for the composition experiment)
+    #[arg(long, default_value_t = String::from("localhost"))]
+    storage_ip: String,
+
     /// The average percentage of hot requests to issue
     #[arg(long, default_value_t = 1.0)]
     hot_percent: f64,
 }
 
-struct UrlGenerator {
-    hot_url: String,
-    cold_url: String,
+struct HotGenerator {
     hot_percent: f64,
     request_counter: f64,
 }
 
-impl UrlGenerator {
-    fn new(ip: &str, hot_percent: f64) -> Self {
+impl HotGenerator {
+    fn new(hot_percent: f64) -> Self {
         assert!(hot_percent >= 0.0);
         assert!(hot_percent <= 1.0);
-        let base_url = format!("http://{}:{}", ip, 8080);
         Self {
-            hot_url: format!("{}/hot", base_url),
-            cold_url: format!("{}/cold", base_url),
             hot_percent,
             request_counter: rand::random(),
         }
     }
 
-    fn next(&mut self, request_type: RequestType) -> String {
+    fn next(&mut self) -> bool {
         self.request_counter += self.hot_percent;
-        let url = if self.request_counter >= 1.0 {
+        if self.request_counter >= 1.0 {
             self.request_counter -= 1.0;
-            &self.hot_url
+            true
         } else {
-            &self.cold_url
-        };
-        format!(
-            "{}/{}",
-            url,
-            match request_type {
-                RequestType::Matmul => "matmul",
-                RequestType::Compute => "compute",
-                RequestType::Io => "io",
-            }
-        )
+            false
+        }
     }
 }
 
@@ -184,12 +172,8 @@ fn main() -> Result<()> {
 
 // #[tokio::main]
 async fn tokio_main(args: Args) -> Result<()> {
-    let mut url_gen = UrlGenerator::new(&args.ip, args.hot_percent);
-    let expected_checksum = match args.request_type {
-        RequestType::Matmul => matmul_checksum(args.input_size),
-        RequestType::Compute => 0,
-        RequestType::Io => 0,
-    };
+    let mut hot_gen = HotGenerator::new(args.hot_percent);
+    let expected_checksum = args.request_type.checksum(args.input_size);
 
     let client = Client::builder()
         .timeout(Duration::from_millis(args.timeout))
@@ -219,12 +203,10 @@ async fn tokio_main(args: Args) -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(_) = timer_rx.recv().await {
-            let url = url_gen.next(args.request_type);
-            let request = client.post(&url).body(match args.request_type {
-                RequestType::Matmul => matmul(args.input_size),
-                RequestType::Compute => vec![],
-                RequestType::Io => vec![],
-            });
+            let is_hot = hot_gen.next();
+            let url = args.request_type.url(&args.ip, is_hot);
+            let body = args.request_type.body(args.input_size, &args.storage_ip);
+            let request = client.post(&url).body(body);
 
             let tx = tx.clone();
             tokio::spawn(async move {
