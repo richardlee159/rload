@@ -16,6 +16,8 @@ use std::{
 };
 use tokio::{runtime::Builder, sync::mpsc};
 
+const RATE_INC_PER_SEC: u64 = 1000;
+
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -48,6 +50,10 @@ struct Args {
     /// Request timeout in milliseconds
     #[arg(long, default_value_t = 10000)]
     timeout: u64,
+
+    // Disable warmup phase before measurement
+    #[arg(long)]
+    no_warmup: bool,
 
     /// Path to output results
     #[arg(long)]
@@ -181,9 +187,15 @@ async fn tokio_main(args: Args) -> Result<()> {
         .build()
         .unwrap();
 
-    let rate_per_sec = std::iter::repeat(args.rate)
-        .take(args.duration as usize)
-        .collect();
+    let mut rate_per_sec = if args.no_warmup {
+        vec![]
+    } else {
+        (RATE_INC_PER_SEC..args.rate)
+            .step_by(RATE_INC_PER_SEC as usize)
+            .collect()
+    };
+    let num_warmup = rate_per_sec.iter().sum::<u64>() as usize;
+    rate_per_sec.extend(std::iter::repeat(args.rate).take(args.duration as usize));
     let starts = ConstGen::new(rate_per_sec);
     let num_expected = starts.expected_len();
     let mut bench_log = BenchLog::new(num_expected + 1);
@@ -252,8 +264,12 @@ async fn tokio_main(args: Args) -> Result<()> {
         }
     });
 
+    let mut num_received = 0;
     while let Some(record) = rx.recv().await {
-        bench_log.add_record(record);
+        num_received += 1;
+        if num_received > num_warmup {
+            bench_log.add_record(record);
+        }
     }
 
     if let Some(results_path) = args.output_file {
@@ -286,7 +302,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         println!("{:5}% -- {}\t", p, l.as_micros());
     }
     // required by the experiment script
-    if num_total < num_expected {
+    if num_received < num_expected {
         return Err("Could not keep up".into());
     }
     println!(
