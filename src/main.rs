@@ -17,6 +17,7 @@ use std::{
 use tokio::{runtime::Builder, sync::mpsc};
 
 const RATE_INC_PER_SEC: u64 = 1000;
+const REQ_ISSUE_SLACK_MS: u64 = 100;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -206,7 +207,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         let base = Instant::now();
         for start in starts {
             let next = base + start;
-            if next.elapsed() > Duration::from_millis(100) {
+            if next.elapsed() > Duration::from_millis(REQ_ISSUE_SLACK_MS) {
                 warn!("Could not keep up with needed rate, canceling experiment");
                 break;
             }
