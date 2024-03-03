@@ -198,24 +198,25 @@ async fn tokio_main(args: Args) -> Result<()> {
     let num_warmup = rate_per_sec.iter().sum::<u64>() as usize;
     rate_per_sec.extend(std::iter::repeat(args.rate).take(args.duration as usize));
     let starts = ConstGen::new(rate_per_sec);
-    let num_expected = starts.expected_len();
-    let mut bench_log = BenchLog::new(num_expected + 1);
+    let mut bench_log = BenchLog::new(starts.expected_len() + 1);
     let (tx, mut rx) = mpsc::channel(100);
     let (timer_tx, mut timer_rx) = mpsc::channel(100);
 
-    tokio::task::spawn_blocking(move || {
+    let task_timer = tokio::task::spawn_blocking(move || {
         let base = Instant::now();
         for start in starts {
             let next = base + start;
             if next.elapsed() > Duration::from_millis(REQ_ISSUE_SLACK_MS) {
                 warn!("Could not keep up with needed rate, canceling experiment");
-                break;
+                let msg: Box<dyn std::error::Error + Send + Sync> = "Could not keep up".into();
+                return Err(msg);
             }
             // higher precision than tokio::time::sleep
             std::thread::sleep(next - Instant::now());
             timer_tx.blocking_send(()).unwrap();
         }
         info!("Started all requests in {:?}", base.elapsed());
+        Ok(())
     });
 
     tokio::spawn(async move {
@@ -303,9 +304,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         println!("{:5}% -- {}\t", p, l.as_micros());
     }
     // required by the experiment script
-    if num_received < num_expected {
-        return Err("Could not keep up".into());
-    }
+    task_timer.await??;
     println!(
         "error%=\"{}\" goodput=\"{}\"",
         num_errors as f64 / num_total as f64,
