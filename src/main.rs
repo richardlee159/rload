@@ -199,7 +199,7 @@ async fn tokio_main(args: Args) -> Result<()> {
     rate_per_sec.extend(std::iter::repeat(args.rate).take(args.duration as usize));
     let starts = ConstGen::new(rate_per_sec);
     let mut bench_log = BenchLog::new(starts.expected_len() + 1);
-    let (tx, mut rx) = mpsc::channel(100);
+    let (record_tx, mut record_rx) = mpsc::channel(100);
     let (timer_tx, mut timer_rx) = mpsc::channel(100);
 
     let task_timer = tokio::task::spawn_blocking(move || {
@@ -226,7 +226,7 @@ async fn tokio_main(args: Args) -> Result<()> {
             let body = args.request_type.body(args.input_size, &args.storage_ip);
             let request = client.post(&url).body(body);
 
-            let tx = tx.clone();
+            let record_tx = record_tx.clone();
             tokio::spawn(async move {
                 let start = SystemTime::now();
                 let result = request.send().await;
@@ -261,13 +261,13 @@ async fn tokio_main(args: Args) -> Result<()> {
                         }
                     }
                 }
-                tx.send(record).await.unwrap();
+                record_tx.send(record).await.unwrap();
             });
         }
     });
 
     let mut num_received = 0;
-    while let Some(record) = rx.recv().await {
+    while let Some(record) = record_rx.recv().await {
         num_received += 1;
         if num_received > num_warmup {
             bench_log.add_record(record);
