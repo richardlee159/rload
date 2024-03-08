@@ -44,9 +44,13 @@ struct Args {
     #[arg(short, long, default_value_t = 1)]
     duration: u64,
 
-    /// Number of requests per second to ussue
+    /// Number of requests per second to issue, 0 means as fast as possible
     #[arg(short, long, default_value_t = 1)]
     rate: u64,
+
+    /// The amount of users (maximum number of concurrent requests)
+    #[arg(long, default_value_t = 10000)]
+    num_users: usize,
 
     /// Request timeout in milliseconds
     #[arg(long, default_value_t = 10000)]
@@ -199,25 +203,37 @@ async fn tokio_main(args: Args) -> Result<()> {
     rate_per_sec.extend(std::iter::repeat(args.rate).take(args.duration as usize));
     let starts = ConstGen::new(rate_per_sec);
     let mut bench_log = BenchLog::new(starts.expected_len() + 1);
-    let (record_tx, mut record_rx) = mpsc::channel(100);
+
     let (timer_tx, mut timer_rx) = mpsc::channel(100);
+    let (user_tx, mut user_rx) = mpsc::channel(args.num_users);
+    let (record_tx, mut record_rx) = mpsc::channel(100);
 
     let task_timer = tokio::task::spawn_blocking(move || {
         let base = Instant::now();
-        for start in starts {
-            let next = base + start;
-            if next.elapsed() > Duration::from_millis(REQ_ISSUE_SLACK_MS) {
-                warn!("Could not keep up with needed rate, canceling experiment");
-                let msg: Box<dyn std::error::Error + Send + Sync> = "Could not keep up".into();
-                return Err(msg);
+        if args.rate == 0 {
+            while base.elapsed().as_secs() < args.duration {
+                timer_tx.blocking_send(()).unwrap();
             }
-            // higher precision than tokio::time::sleep
-            std::thread::sleep(next - Instant::now());
-            timer_tx.blocking_send(()).unwrap();
+        } else {
+            for start in starts {
+                let next = base + start;
+                if next.elapsed() > Duration::from_millis(REQ_ISSUE_SLACK_MS) {
+                    warn!("Could not keep up with needed rate, canceling experiment");
+                    let msg: Box<dyn std::error::Error + Send + Sync> = "Could not keep up".into();
+                    return Err(msg);
+                }
+                // higher precision than tokio::time::sleep
+                std::thread::sleep(next - Instant::now());
+                timer_tx.blocking_send(()).unwrap();
+            }
         }
         info!("Started all requests in {:?}", base.elapsed());
         Ok(())
     });
+
+    for user_id in 0..args.num_users {
+        user_tx.send(user_id).await.unwrap();
+    }
 
     tokio::spawn(async move {
         while let Some(_) = timer_rx.recv().await {
@@ -226,6 +242,8 @@ async fn tokio_main(args: Args) -> Result<()> {
             let body = args.request_type.body(args.input_size, &args.storage_ip);
             let request = client.post(&url).body(body);
 
+            let user_id = user_rx.recv().await.unwrap();
+            let user_tx = user_tx.clone();
             let record_tx = record_tx.clone();
             tokio::spawn(async move {
                 let start = SystemTime::now();
@@ -261,6 +279,8 @@ async fn tokio_main(args: Args) -> Result<()> {
                         }
                     }
                 }
+                // user_rx could be dropped first (when timer_tx is closed), so we don't check the result here.
+                let _ = user_tx.send(user_id).await;
                 record_tx.send(record).await.unwrap();
             });
         }
