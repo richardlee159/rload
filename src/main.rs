@@ -204,7 +204,7 @@ async fn tokio_main(args: Args) -> Result<()> {
     let starts = ConstGen::new(rate_per_sec);
     let mut bench_log = BenchLog::new(starts.expected_len() + 1);
 
-    let (timer_tx, mut timer_rx) = mpsc::channel(100);
+    let (step_tx, mut step_rx) = mpsc::channel(100);
     let (user_tx, mut user_rx) = mpsc::channel(args.num_users);
     let (record_tx, mut record_rx) = mpsc::channel(100);
 
@@ -212,7 +212,7 @@ async fn tokio_main(args: Args) -> Result<()> {
         let base = Instant::now();
         if args.rate == 0 {
             while base.elapsed().as_secs() < args.duration {
-                timer_tx.blocking_send(()).unwrap();
+                step_tx.blocking_send(()).unwrap();
             }
         } else {
             for start in starts {
@@ -224,7 +224,7 @@ async fn tokio_main(args: Args) -> Result<()> {
                 }
                 // higher precision than tokio::time::sleep
                 std::thread::sleep(next - Instant::now());
-                timer_tx.blocking_send(()).unwrap();
+                step_tx.blocking_send(()).unwrap();
             }
         }
         info!("Started all requests in {:?}", base.elapsed());
@@ -236,7 +236,7 @@ async fn tokio_main(args: Args) -> Result<()> {
     }
 
     tokio::spawn(async move {
-        while let Some(_) = timer_rx.recv().await {
+        while let Some(_) = step_rx.recv().await {
             let is_hot = hot_gen.next();
             let url = args.request_type.url(&args.ip, is_hot);
             let body = args.request_type.body(args.input_size, &args.storage_ip);
